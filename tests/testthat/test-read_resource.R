@@ -95,6 +95,110 @@ test_that("read_resource() returns error on column selection not in schema", {
   )
 })
 
+test_that("read_resource() returns error on missing columns in data", {
+  temp_package_dir <- file.path(tempdir(),"missing_cols_package")
+  # Create datapackage with missing columns in data
+  dir.create(temp_package_dir)
+  file.copy(from = list.files(system.file("extdata", package = "frictionless"),
+                              full.names = TRUE),
+            to = file.path(
+              temp_package_dir,
+              list.files(system.file("extdata", package = "frictionless"),
+                         full.names = FALSE))
+  )
+  readr::read_csv(file.path(temp_package_dir, "deployments.csv"),
+                  col_select = -start,
+                  show_col_types = FALSE) %>%
+    readr::write_csv(file.path(temp_package_dir, "deployments.csv"))
+  # Clean up after test
+  on.exit(unlink(temp_package_dir, recursive = TRUE))
+  # Read the new package
+  missing_cols_package <-
+    suppressMessages(
+      read_package(file.path(temp_package_dir,"datapackage.json"))
+      )
+  # Test
+  expect_error(
+    read_resource(missing_cols_package, "deployments"),
+    regexp = "must match column names in data"
+  )
+})
+
+test_that("read_resource() returns error on extra columns in data", {
+  # clean up after test
+  on.exit(unlink(file.path(tempdir(),"extra_cols_package"), recursive = TRUE))
+  # create datapackage with extra columns in data
+  temp_package_dir <- file.path(tempdir(),"extra_cols_package")
+  dir.create(temp_package_dir)
+  file.copy(from = list.files(system.file("extdata", package = "frictionless"),
+                              full.names = TRUE),
+            to = file.path(
+              temp_package_dir,
+              list.files(system.file("extdata", package = "frictionless"),
+                         full.names = FALSE))
+  )
+  readr::read_csv(file.path(temp_package_dir, "deployments.csv"),
+                  show_col_types = FALSE) %>%
+    dplyr::mutate(random_column = runif(n = 3)) %>%
+    readr::write_csv(file.path(temp_package_dir, "deployments.csv"))
+  # read the new package
+  extra_cols_package <-
+    suppressMessages(
+      read_package(file.path(temp_package_dir,"datapackage.json"))
+    )
+  # Test
+  expect_error(
+    read_resource(extra_cols_package, "deployments"),
+    regexp = "must match column names in data"
+  )
+})
+
+test_that("read_resource() returns error on missing columns in schema", {
+  # create package with a missing column in the schema of observations
+  missing_col_in_schema_pkg <- example_package
+  ## remove `timestamp`
+  missing_col_in_schema_pkg$resources[[2]]$schema$fields <-
+    missing_col_in_schema_pkg$resources[[2]]$schema$fields[-3]
+  # Test
+  expect_error(
+    read_resource(missing_col_in_schema_pkg, "observations"),
+    regexp = "must match column names in data"
+  )
+})
+
+test_that("read_resource() returns error on column order mismatch between
+          schema and data", {
+  # Create package with the wrong order in the schema of deployments
+  wrong_order_in_schema_pkg <- example_package
+  ## Reorder columns
+  purrr::pluck(wrong_order_in_schema_pkg, "resources", 1, "schema", "fields") <-
+    purrr::chuck(wrong_order_in_schema_pkg, "resources", 1, "schema", "fields")[
+      c(5, 1, 4, 3, 2) # this is not the order the columns have in the data!
+    ]
+  # Test
+  expect_error(
+    read_resource(wrong_order_in_schema_pkg, "deployments"),
+    regexp = "must match column names in data"
+  )
+})
+
+test_that("read_resource() doesn't compare header when dialect$header is null", {
+  # not only will it not be compared, the header will be skipped when reading
+})
+
+test_that("read_resource() allows case mismatch between schema and data", {
+  # create package with the wrong case in the schema of observations
+  wrong_case_in_schema_pkg <- example_package
+  ## Change case of single field name
+  wrong_case_in_schema_pkg$resources[[2]]$schema$fields[[3]]$name <-
+    toupper(wrong_case_in_schema_pkg$resources[[2]]$schema$fields[[3]]$name)
+  # Test
+  expect_s3_class(
+    read_resource(wrong_case_in_schema_pkg, "observations"),
+    "tbl"
+  )
+})
+
 test_that("read_resource() returns error on incorrect Data Package", {
   expect_error(
     read_resource(list(), "deployments"),

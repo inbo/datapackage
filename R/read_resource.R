@@ -352,11 +352,11 @@ read_resource <- function(package, resource_name, col_select = NULL) {
   # Read data directly
   if (resource$read_from == "df") {
     df <- dplyr::as_tibble(resource$data)
-
+    data_col_names <- colnames(df)
   # Read data from data
   } else if (resource$read_from == "data") {
     df <- dplyr::as_tibble(do.call(rbind.data.frame, resource$data))
-
+    data_col_names <- colnames(df)
   # Read data from path(s)
   } else if (resource$read_from == "path" || resource$read_from == "url") {
     dataframes <- list()
@@ -391,7 +391,41 @@ read_resource <- function(package, resource_name, col_select = NULL) {
     }
     # Merge data frames for all paths
     df <- dplyr::bind_rows(dataframes)
+    # Read header from first file
+    data_col_names <-
+      readr::read_lines(file = paths[1], n_max = 1) %>%
+      I() %>%
+      readr::read_delim(delim = replace_null(dialect$delimiter, ","),
+                        quote = replace_null(dialect$quoteChar, "\""),
+                        escape_backslash = ifelse(
+                          replace_null(dialect$escapeChar, "not set") == "\\", TRUE, FALSE
+                        ),
+                        escape_double = ifelse(
+                          # if escapeChar is set, set doubleQuote to FALSE (mutually exclusive)
+                          replace_null(dialect$escapeChar, "not set") == "\\",
+                          FALSE,
+                          replace_null(dialect$doubleQuote, TRUE)
+                        ),
+                        locale = locale,
+                        na = replace_null(schema$missingValues, ""),
+                        comment = replace_null(dialect$commentChar, ""),
+                        trim_ws = replace_null(dialect$skipInitialSpace, FALSE),
+                        col_names = FALSE,
+                        show_col_types = FALSE) %>%
+      dplyr::slice_head(n = 1) %>%
+      unlist(use.names = FALSE)
   }
+  # compare df header to schema
+  assertthat::assert_that(
+    identical(tolower(col_names), tolower(data_col_names)),
+    msg = glue::glue(
+      "Field names in `schema` must match column names in data:",
+      "\u2139 Field names: `{field_names_collapse}`",
+      "\u2139 Column names in data: `{data_col_names_collapse}`",
+      .sep = "\n",
+      field_names_collapse = glue::glue_collapse(col_names, sep = ", "),
+      data_col_names_collapse = glue::glue_collapse(data_col_names, sep = ", ")
+    ))
 
   return(df)
 }
